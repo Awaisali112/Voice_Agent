@@ -34,6 +34,15 @@ from pypdf import PdfReader, PdfWriter
 
 load_dotenv(".env")
 
+MENU_SUMMARY = """
+MENU HIGHLIGHTS:
+Starters: Seekh Kebab $14, Chicken Tikka $13, Samosa Chaat $11, Dahi Bhalle $10
+Mains: Nihari $28, Karahi Gosht $26, Butter Chicken $24, Dal Makhani $18, Biryani $27, Palak Paneer $19
+Breads: Tandoori Naan $4, Garlic Naan $5, Paratha $4, Peshwari Naan $6
+Desserts: Gulab Jamun $8, Kheer $8, Gajar Halwa $9
+Drinks: Mango Lassi $7, Rose Sharbat $6, Masala Chai $5
+"""
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("restaurant-agent")
 
@@ -42,11 +51,11 @@ logger = logging.getLogger("restaurant-agent")
 # Restaurant configuration
 # ---------------------------------------------------------------------------
 
-RESTAURANT_NAME  = "Johny & jugnu"
-RESTAURANT_ADDR  = "42 Rosewood Avenue"
-RESTAURANT_PHONE = "(555) 820-3300"
-OPENING_HOUR     = 17      # 5 PM
-CLOSING_HOUR     = 22      # 10 PM
+RESTAURANT_NAME  = "Lahore Hotel And Restaurant"
+RESTAURANT_ADDR  = "Mall Road, Lahore, Punjab, Pakistan"
+RESTAURANT_PHONE = "+92 42 3636 0000"
+OPENING_HOUR     = 7       # 7 AM (Breakfast)
+CLOSING_HOUR     = 23      # 11 PM (end of Dinner)
 MAX_PARTY_SIZE   = 20
 MIN_PARTY_SIZE   = 1
 ADVANCE_DAYS     = 60
@@ -192,7 +201,7 @@ def _build_receipt_pdf(res: dict, path: str) -> None:
     story.append(HRFlowable(width="100%", thickness=1, color=gold))
     story.append(Spacer(1, 12))
     story.append(Paragraph(
-        "Thank you for choosing Johny & Jugnu. We look forward to welcoming you.",
+        "Thank you for choosing Lahore Hotel And Restaurant. We look forward to welcoming you.",
         footer_style,
     ))
     story.append(Spacer(1, 6))
@@ -245,11 +254,29 @@ def _parse_date(date_str: str) -> date | None:
 
 
 def _parse_time(time_str: str) -> int | None:
-    for fmt in ("%I:%M %p", "%I %p", "%I:%M%p", "%I%p", "%H:%M", "%H"):
+    """Parse a time string into an hour (0-23). Handles many spoken formats."""
+    s = time_str.strip().upper()
+
+    # Try standard strptime formats first
+    for fmt in ("%I:%M %p", "%I %p", "%I:%M%p", "%I%p", "%H:%M", "%H:%M:%S", "%H"):
         try:
-            return datetime.strptime(time_str.strip().upper(), fmt.upper()).hour
+            return datetime.strptime(s, fmt).hour
         except ValueError:
             continue
+
+    # Handle formats like "7PM", "7 PM", "19:00", "7:30PM"
+    import re
+    m = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    if m:
+        hour = int(m.group(1))
+        meridiem = m.group(3)
+        if meridiem == 'PM' and hour != 12:
+            hour += 12
+        elif meridiem == 'AM' and hour == 12:
+            hour = 0
+        if 0 <= hour <= 23:
+            return hour
+
     return None
 
 
@@ -302,16 +329,18 @@ class RestaurantAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=f"""
-You are Sofia, the reservations host at {RESTAURANT_NAME}, a warm and upscale Italian restaurant.
+You are Parveen, the reservations host at {RESTAURANT_NAME}, a warm and upscale Pakistani restaurant.
 
-Your only job is to help guests make, look up, and cancel dinner reservations.
+Your job is to help guests make, look up, and cancel dinner reservations, and answer menu questions.
 
 RESTAURANT DETAILS:
 - Name: {RESTAURANT_NAME}
 - Address: {RESTAURANT_ADDR}
 - Phone: {RESTAURANT_PHONE}
-- Dinner service: 5:00 PM to 10:00 PM, 7 days a week
+- Dining hours: Breakfast 7:00 AM–11:00 AM, Lunch 12:00 PM–4:00 PM, Dinner 6:00 PM–11:00 PM, 7 days a week
 - Max party size: {MAX_PARTY_SIZE}
+
+{MENU_SUMMARY}
 
 RULES:
 1. To make a reservation you need: guest name, date, time, and party size.
@@ -321,7 +350,8 @@ RULES:
    the guest to confirm with "yes" or "no", then call confirm_action.
 4. To look up a reservation, ask for the guest's last name or confirmation code.
 5. Keep all spoken responses concise and warm — no bullet points or markdown.
-6. If a guest asks about anything unrelated to reservations, politely redirect.
+6. When asking for time, ask the guest to say it like "7 PM" or "half past 7".
+7. If asked about the menu, describe dishes warmly and briefly.
 """,
         )
 
@@ -543,7 +573,7 @@ async def my_agent(ctx: agents.JobContext):
     session = AgentSession(
         stt=deepgram.STT(model="nova-2"),
         llm=openai.LLM.with_ollama(
-            model="minimax-m2.5:cloud",
+            model="gemini-3-flash-preview:cloud",
             base_url="http://localhost:11434/v1",
         ),
         tts=EdgeTTS(voice="en-US-AriaNeural"),
@@ -566,8 +596,8 @@ async def my_agent(ctx: agents.JobContext):
     )
 
     await session.generate_reply(
-        instructions=(
-            f"Greet the guest warmly as Sofia, the reservations host at {RESTAURANT_NAME}. "
+        user_input=(
+            f"Greet the guest warmly as Parveen, the reservations host at {RESTAURANT_NAME}. "
             "Tell them you can help make, look up, or cancel a reservation. "
             "Keep it to two friendly sentences."
         )
